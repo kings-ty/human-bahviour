@@ -31,17 +31,7 @@ class SlowOnlyModel(nn.Module):
         else:
             self.backbone = models.resnet18(pretrained=True)  # Default to lightest
         
-        # Modify first conv layer for video input (3D convolution)
-        self.backbone.conv1 = nn.Conv3d(
-            3, 64,
-            kernel_size=(1, 7, 7),
-            stride=(1, 2, 2),
-            padding=(0, 3, 3),
-            bias=False
-        )
-        
-        # Modify backbone for 3D processing
-        self.backbone = self._convert_to_3d(self.backbone)
+        # Keep original 2D backbone - we'll process frames individually
         
         # Remove final classification layer
         self.backbone.fc = nn.Identity()
@@ -56,8 +46,8 @@ class SlowOnlyModel(nn.Module):
             nn.Linear(128, self.num_classes)
         )
         
-        # Global average pooling for temporal dimension
-        self.global_avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        # Global average pooling - use 2D for compatibility
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
     
     def _convert_to_3d(self, model):
         """Convert 2D convolutions to 3D for video processing"""
@@ -115,12 +105,28 @@ class SlowOnlyModel(nn.Module):
         Input: (B, C, T, H, W) where T is temporal dimension
         Output: (B, num_classes)
         """
-        # Extract features  
-        features = self.backbone(x)  # (B, features, T', H', W')
+        print(f"Input shape: {x.shape}")
         
-        # Global average pooling
-        features = self.global_avg_pool(features)  # (B, features, 1, 1, 1)
-        features = features.view(features.size(0), -1)  # (B, features)
+        # For video input, process each frame and average
+        B, C, T, H, W = x.shape
+        
+        # Reshape to process all frames at once: (B*T, C, H, W)
+        x = x.view(B * T, C, H, W)
+        print(f"Reshaped for backbone: {x.shape}")
+        
+        # Extract features from all frames
+        features = self.backbone(x)  # (B*T, features, H', W')
+        print(f"Backbone output shape: {features.shape}")
+        
+        # Global average pooling over spatial dimensions
+        features = self.global_avg_pool(features)  # (B*T, features, 1, 1)
+        features = features.view(features.size(0), -1)  # (B*T, features)
+        print(f"After spatial pooling: {features.shape}")
+        
+        # Reshape back and average over time: (B, T, features) -> (B, features)
+        features = features.view(B, T, -1)  # (B, T, features)
+        features = torch.mean(features, dim=1)  # (B, features) - average over time
+        print(f"After temporal averaging: {features.shape}")
         
         # Classification
         logits = self.classifier(features)  # (B, num_classes)
