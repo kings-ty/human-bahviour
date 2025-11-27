@@ -3,7 +3,7 @@ CPU-Optimized Configuration for HRI30 Action Recognition
 For systems without CUDA/GPU support - maximum compatibility
 """
 
-from config import get_config_for_device, DataConfig, ModelConfig, TrainingConfig
+from configs.config import get_config_for_device, DataConfig, ModelConfig, TrainingConfig
 
 def get_cpu_optimized_config():
     """Get configuration optimized specifically for CPU training"""

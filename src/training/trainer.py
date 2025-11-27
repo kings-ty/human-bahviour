@@ -21,7 +21,7 @@ from datetime import datetime
 import wandb
 
 from configs.config import ModelConfig, TrainingConfig, get_config_for_device
-from src.models import SlowOnlyModel
+from src.models.models import SlowOnlyModel, create_model, ModelUtils, LossFunction
 from src.data.data_loader import HRI30DataModule
 
 
@@ -129,7 +129,7 @@ class HRI30Trainer:
         self.device = device
         
         # Create model
-        self.model = SlowOnlyModel(config=model_config).to(device)
+        self.model = create_model(model_config).to(device)
         
         # Create optimizer (SGD as specified in paper)
         self.optimizer = self._create_optimizer()
@@ -139,6 +139,7 @@ class HRI30Trainer:
         if class_weights is not None:
             class_weights = class_weights.to(device)
         
+        # Create loss function
         self.criterion = LossFunction.create_loss_function(
             loss_type="cross_entropy",
             class_weights=class_weights

@@ -442,7 +442,7 @@ services:
 Hardware-optimized configuration
 """
 
-from config import get_config_for_device
+from configs.config import get_config_for_device
 
 def get_optimized_config():
     """Get configuration optimized for this hardware tier"""

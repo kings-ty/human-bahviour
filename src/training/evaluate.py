@@ -20,9 +20,9 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 
-from config import get_config_for_device, DataConfig
-from models import create_model
-from data_loader import HRI30DataModule
+from configs.config import get_config_for_device, DataConfig
+from src.models.models import create_model
+from src.data.data_loader import HRI30DataModule
 
 
 class HRI30Evaluator:
@@ -59,7 +59,7 @@ class HRI30Evaluator:
         checkpoint = torch.load(self.model_path, map_location=self.device)
         
         # Recreate model from saved config
-        from config import ModelConfig
+        from configs.config import ModelConfig
         model_config_dict = checkpoint['model_config']
         model_config = ModelConfig(**model_config_dict)
         
@@ -83,7 +83,7 @@ class HRI30Evaluator:
         print(f"{'='*60}")
         
         # Create data module for this split
-        from config import ModelConfig
+        from configs.config import ModelConfig
         model_config = ModelConfig()  # Default config
         data_module = HRI30DataModule(self.data_config, model_config, split_id=split_id)
         

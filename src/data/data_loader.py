@@ -154,15 +154,76 @@ class HRI30Dataset(Dataset):
         return None
     
     def _load_samples(self) -> List[Dict[str, Any]]:
-        """Load video samples based on split"""
+        """Load video samples using CSV labels"""
         samples = []
         
-        # Look for video files in train_set directory
-        video_dir = os.path.join(self.config.data_root, self.config.train_dir)
+        # Load labels from CSV file
+        labels_file = os.path.join(self.config.data_root, self.config.annotations_dir, "train_set_labels.csv")
+        if not os.path.exists(labels_file):
+            print(f"Warning: Labels file {labels_file} not found!")
+            return []
+        
+        # Read CSV labels
+        labels_data = {}
+        
+        # Create class name mapping from CSV format to config format
+        class_name_mapping = {
+            "DeliverObject": "Deliver_Object",
+            "MoveBackwardsWhileDrilling": "Move_Backwards_While_Drilling",
+            "MoveBackwardsWhilePolishing": "Move_Backwards_While_Polishing",
+            "MoveDiagonallyBackwardLeftWithDrill": "Move_Diagonally_Backward_Left_with_Drill",
+            "MoveDiagonallyBackwardLeftWithPolisher": "Move_Diagonally_Backward_Left_with_Polisher",
+            "MoveDiagonallyBackwardRightWithDrill": "Move_Diagonally_Backward_Right_with_Drill",
+            "MoveDiagonallyBackwardRightWithPolisher": "Move_Diagonally_Backward_Right_with_Polisher",
+            "MoveDiagonallyForwardLeftWithDrill": "Move_Diagonally_Forward_Left_with_Drill",
+            "MoveDiagonallyForwardLeftWithPolisher": "Move_Diagonally_Forward_Left_with_Polisher",
+            "MoveDiagonallyForwardRightWithDrill": "Move_Diagonally_Forward_Right_with_Drill",
+            "MoveDiagonallyForwardRightWithPolisher": "Move_Diagonally_Forward_Right_with_Polisher",
+            "MoveForwardWhileDrilling": "Move_Forward_While_Drilling",
+            "MoveForwardWhilePolishing": "Move_Forward_While_Polishing",
+            "MoveLeftWhileDrilling": "Move_Left_While_Drilling",
+            "MoveLeftWhilePolishing": "Move_Left_While_Polishing",
+            "MoveRightWhileDrilling": "Move_Right_While_Drilling",
+            "MoveRightWhilePolishing": "Move_Right_While_Polishing",
+            "NoCollaborativeWithDrill": "No_Collaborative_with_Drill",
+            "NoCollaborativeWithDrilll": "No_Collaborative_with_Drill",  # Handle typo in CSV
+            "NoCollaborativeWithPolisher": "No_Collaborative_with_Polisher",
+            "PickUpDrill": "Pick_Up_Drill",
+            "PickUpPolisher": "Pick_Up_Polisher",
+            "PickUpTheObject": "Pick_Up_The_Object",
+            "PutDownDrill": "Put_Down_Drill",
+            "PutDownPolisher": "Put_Down_Polisher",
+            "UsingTheDrill": "Using_The_Drill",
+            "UsingThePolisher": "Using_The_Polisher",
+            "Walking": "Walking",
+            "WalkingWithDrill": "Walking_with_Drill",
+            "WalkingWithObject": "Walking_with_Object",
+            "WalkingWithPolisher": "Walking_with_Polisher"
+        }
+        
+        with open(labels_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    parts = line.split(',')
+                    if len(parts) >= 2:
+                        video_name = parts[0]
+                        csv_class_name = parts[1]
+                        # Map class name from CSV format to config format
+                        config_class_name = class_name_mapping.get(csv_class_name, csv_class_name)
+                        labels_data[video_name] = config_class_name
+        
+        print(f"Loaded {len(labels_data)} labels from CSV")
+        
+        # Determine which directory to use based on split
+        if self.split == "train":
+            video_dir = os.path.join(self.config.data_root, "train_set")
+        else:
+            video_dir = os.path.join(self.config.data_root, "test_set")
         
         if not os.path.exists(video_dir):
-            print(f"Warning: {video_dir} does not exist. Looking for video files in root directory...")
-            video_dir = self.config.data_root
+            print(f"Warning: {video_dir} does not exist!")
+            return []
         
         # Find all video files
         video_patterns = ["*.avi", "*.mp4", "*.mov"]
@@ -170,47 +231,41 @@ class HRI30Dataset(Dataset):
         
         for pattern in video_patterns:
             video_files.extend(glob.glob(os.path.join(video_dir, pattern)))
-            video_files.extend(glob.glob(os.path.join(video_dir, "**", pattern), recursive=True))
         
-        print(f"Found {len(video_files)} video files")
+        print(f"Found {len(video_files)} video files in {video_dir}")
         
-        # Parse filenames and create samples
+        # Create samples from video files with labels
         for video_file in video_files:
             filename = os.path.basename(video_file)
-            parsed = self._parse_filename(filename)
+            video_name = os.path.splitext(filename)[0]  # Remove extension
             
-            if parsed is not None:
-                sample = {
-                    'video_path': video_file,
-                    'class_idx': parsed['class_label'] % self.config.num_classes,  # Ensure valid class
-                    'class_name': self.config.action_classes[parsed['class_label'] % self.config.num_classes],
-                    'group': parsed['group'],
-                    'clip': parsed['clip']
-                }
-                samples.append(sample)
-            else:
-                # If filename doesn't match pattern, try to infer from directory structure
-                rel_path = os.path.relpath(video_file, self.config.data_root)
-                path_parts = rel_path.split(os.sep)
+            # Get class label from CSV
+            if video_name in labels_data:
+                class_name = labels_data[video_name]
                 
-                # Try to find class name in path
-                for part in path_parts:
-                    if part in self.config.action_classes:
-                        sample = {
-                            'video_path': video_file,
-                            'class_idx': self.config.action_classes.index(part),
-                            'class_name': part,
-                            'group': 0,
-                            'clip': 0
-                        }
-                        samples.append(sample)
-                        break
+                # Check if class name is valid
+                if class_name in self.config.action_classes:
+                    sample = {
+                        'video_path': video_file,
+                        'class_idx': self.config.action_classes.index(class_name),
+                        'class_name': class_name,
+                        'group': 0,  # Default group
+                        'clip': 0    # Default clip
+                    }
+                    samples.append(sample)
+                else:
+                    print(f"Warning: Unknown class '{class_name}' for video {video_name}")
+            else:
+                print(f"Warning: No label found for video {video_name}")
+        
+        print(f"Created {len(samples)} valid samples")
+        
+        if len(samples) == 0:
+            print("Warning: No valid samples found!")
+            return []
         
         # Apply train/test split based on paper specifications
         total_samples = len(samples)
-        if total_samples == 0:
-            print("Warning: No valid samples found!")
-            return []
         
         # Random split based on split_id
         random.seed(42 + self.split_id)  # Ensure reproducibility
@@ -218,13 +273,12 @@ class HRI30Dataset(Dataset):
         
         if self.split == "train":
             split_ratio = self.config.train_split_ratios[self.split_id - 1]
-        else:
-            split_ratio = self.config.test_split_ratios[self.split_id - 1]
-        
-        if self.split == "train":
             samples = samples[:int(total_samples * split_ratio)]
         else:
-            samples = samples[int(total_samples * self.config.train_split_ratios[self.split_id - 1]):]
+            split_ratio = self.config.test_split_ratios[self.split_id - 1]
+            train_ratio = self.config.train_split_ratios[self.split_id - 1]
+            train_size = int(total_samples * train_ratio)
+            samples = samples[train_size:]
         
         return samples
     
@@ -345,7 +399,7 @@ def create_sample_data_structure():
 
 if __name__ == "__main__":
     # Test the data loader
-    from config import get_config_for_device
+    from configs.config import get_config_for_device
     
     config = get_config_for_device()
     data_config = config['data']

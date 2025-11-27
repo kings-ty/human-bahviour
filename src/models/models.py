@@ -339,7 +339,7 @@ class FocalLoss(nn.Module):
 
 if __name__ == "__main__":
     # Test model creation
-    from config import get_config_for_device
+    from configs.config import get_config_for_device
     
     config = get_config_for_device()
     model_config = config['model']
