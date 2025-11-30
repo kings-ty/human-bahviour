@@ -136,4 +136,5 @@ tb_logs/
 # Error logs
 error.log
 debug.log
-training.log
+training.log*.whl
+*.sh
