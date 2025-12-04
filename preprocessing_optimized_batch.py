@@ -39,7 +39,7 @@ KEYPOINT_NAMES = [
 ]
 
 class OptimizedPoseExtractor:
-    def __init__(self, model_path='yolov8n-pose.pt', device='cuda', deinterlace_method='bob'):
+    def __init__(self, model_path='yolov8n-pose.pt', device='cuda', deinterlace_method='linear'):
         self.device = device
         self.model = YOLO(model_path)
         self.deinterlace_method = deinterlace_method
