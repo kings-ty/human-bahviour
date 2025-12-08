@@ -7,6 +7,7 @@ Target: 85%+ Accuracy (Fixed Scaling & Bone Calculation)
 import argparse
 import numpy as np
 import torch
+import random
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -103,16 +104,60 @@ class NTUCompatibleDataset(Dataset):
         return ntu_seq
 
     def _apply_augmentation(self, seq):
-        # Random rotation and scaling augmentations
+        """
+        🚀 SOTA-Level Augmentation Strategy
+        1. Geometric: Rotation + Scaling + Shear (Viewpoint Invariance)
+        2. Temporal: Crop & Resize (Speed Invariance)
+        3. Structural: Joint Masking (Occlusion Robustness)
+        4. Noise: Gaussian Jitter (Sensor Noise)
+        """
+        C, T, V = seq.shape[2], seq.shape[0], seq.shape[1] # (64, 25, 3)
+
+        # 1. Geometric: Rotation & Shear
         if np.random.rand() < 0.5: 
+            # Rotation
             angle = np.random.uniform(-15, 15)
             rad = np.deg2rad(angle)
             cos_a, sin_a = np.cos(rad), np.sin(rad)
             rot_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
-            seq[:, :, :2] = seq[:, :, :2] @ rot_matrix.T
+            
+            # Shear (Simulating camera perspective distortion)
+            shear_x = np.random.uniform(-0.1, 0.1)
+            shear_y = np.random.uniform(-0.1, 0.1)
+            shear_matrix = np.array([[1, shear_x], [shear_y, 1]])
+            
+            # Apply combined transform to X,Y
+            seq[:, :, :2] = seq[:, :, :2] @ rot_matrix.T @ shear_matrix.T
+
+        # 2. Geometric: Scaling
         if np.random.rand() < 0.5: 
-            scale = np.random.uniform(0.9, 1.1)
+            scale = np.random.uniform(0.85, 1.15)
             seq[:, :, :2] *= scale
+
+        # 3. Structural: Joint Masking (DISABLED due to high missing rate in raw data)
+        # if np.random.rand() < 0.3:
+        #     num_mask = np.random.randint(1, 4)
+        #     mask_indices = np.random.choice(V, num_mask, replace=False)
+        #     seq[:, mask_indices, :] = 0.0
+
+        # 4. Temporal: Crop & Resize (Speed Variation)
+        # Randomly crop a segment and resize back to original length (linear interp)
+        if np.random.rand() < 0.3:
+            crop_ratio = np.random.uniform(0.8, 1.0)
+            crop_len = int(T * crop_ratio)
+            start = np.random.randint(0, T - crop_len)
+            
+            # (T, V, C) -> (C, T, V) for pytorch interpolation
+            tensor_seq = torch.from_numpy(seq).permute(2, 0, 1).unsqueeze(0) 
+            cropped = tensor_seq[:, :, start:start+crop_len, :]
+            resized = F.interpolate(cropped, size=(T, V), mode='bilinear', align_corners=False)
+            seq = resized.squeeze(0).permute(1, 2, 0).numpy()
+
+        # 5. Noise: Gaussian Jitter
+        if np.random.rand() < 0.2:
+            sigma = 0.01
+            seq += np.random.normal(0, sigma, seq.shape)
+
         return seq
 
     def __getitem__(self, idx):
@@ -134,15 +179,15 @@ class NTUCompatibleDataset(Dataset):
             bone_data = torch.zeros_like(seq_tensor)
             for v1, v2 in self.ntu_pairs:
                 bone_data[:, :, v1] = seq_tensor[:, :, v1] - seq_tensor[:, :, v2]
-            final_data = bone_data / 4.0
+            final_data = bone_data  # REMOVED / 4.0 (Data is already small 0~1)
             
         elif self.stream == 'motion':
             motion_data = torch.zeros_like(seq_tensor)
             motion_data[:, :-1, :] = seq_tensor[:, 1:, :] - seq_tensor[:, :-1, :]
-            final_data = motion_data * 10.0
+            final_data = motion_data * 10.0 # Keep amplification for small motion
         else:
             # Joint stream (normalized)
-            final_data = seq_tensor / 3.0
+            final_data = seq_tensor # REMOVED / 3.0 (Data is already 0~1)
 
         if self.mixup_alpha > 0 and self.augment:
             lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
@@ -188,6 +233,8 @@ def train_epoch(model, loader, criterion, optimizer, device):
         output = model(data)
         loss = (lam * criterion(output, y1) + (1 - lam) * criterion(output, y2)).mean()
         loss.backward()
+        # 🛑 Gradient Clipping (SpaceX Stability Check)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         total_loss += loss.item()
         correct += output.argmax(dim=1).eq(y1).sum().item()
@@ -211,7 +258,19 @@ def evaluate(model, loader, criterion, device):
 # ============================================================================
 # Main Loop (updated)
 # ============================================================================
+def set_seed(seed=42):
+    """🔒 Lock the Random Seed for Exact Reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"🔒 Seed Fixed: {seed}")
+
 def main():
+    set_seed(42) # Lock it down.
     parser = argparse.ArgumentParser()
     parser.add_argument('--stream', type=str, default='joint') # joint or bone
     parser.add_argument('--batch_size', type=int, default=32)
@@ -219,17 +278,31 @@ def main():
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--pretrained_path', type=str, default='checkpoints_pretrained/ctrgcn_ntu120_pretrained.pt')
     parser.add_argument('--fold', type=int, default=-1)
-    parser.add_argument('--data_dir', type=str, default='/home/ty/human-bahviour/pose_features_large/multistream')
+    parser.add_argument('--data_dir', type=str, default='/home/ty/human-bahviour/pose_features_large')
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"🚀 TOPOLOGY-AWARE TRAINING | Stream: {args.stream} | Device: {device}")
 
-    # Load Data: always load JOINT data only (bone stream is computed internally)
-    data_dir = Path(args.data_dir)
-    print(f"📂 Loading JOINT data source for robust mapping...")
-    data = np.load(data_dir / 'joint_stream.npy') 
-    labels = np.load(data_dir / 'labels.npy')
+    data_dir = Path(args.data_dir) # Define data_dir from args
+    
+    # SAFETY CHECK: Prevent Data Leakage from pre-augmented files
+    # We must split the ORIGINAL data (2099) first, then augment only the train fold.
+    seq_path = data_dir / 'train_sequences_good.npy'
+    lbl_path = data_dir / 'train_labels.npy'
+
+    if not seq_path.exists():
+         # Fallback for alternative directory structure if needed
+         seq_path = data_dir / 'multistream/joint_stream.npy'
+         lbl_path = data_dir / 'multistream/labels.npy'
+
+    if (data_dir / 'train_sequences_aug.npy').exists():
+        print(f"⚠️  WARNING: Found 'train_sequences_aug.npy'. IGNORING it to prevent Data Leakage.")
+        print(f"    We will use On-the-Fly augmentation on the Training Fold only.")
+
+    print(f"📂 Loading Original Data from: {seq_path}")
+    data = np.load(seq_path) 
+    labels = np.load(lbl_path)
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
@@ -239,6 +312,10 @@ def main():
         print(f"\n🔹 FOLD {fold + 1}/5")
         X_train, X_val = data[train_idx], data[val_idx]
         y_train, y_val = labels[train_idx], labels[val_idx]
+        
+        print(f"   📊 Data Split: Train={len(X_train)} (Augmented On-The-Fly), Val={len(X_val)}")
+        if len(X_val) != 420 and len(X_val) != 419:
+             print(f"   ⚠️  Note: Validation size is {len(X_val)}, expected ~420.")
 
         # Pass stream info when creating Dataset (scaling / bone calculation decided here)
         train_dataset = NTUCompatibleDataset(X_train, y_train, stream=args.stream, augment=True, mixup_alpha=0.2)
