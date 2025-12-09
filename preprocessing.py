@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 YOLOv8-Pose Feature Extraction for HRI30 Dataset
-Extracts skeleton keypoints from videos using YOLOv8-Pose model on Jetson Xavier AGX
+Extracts skeleton keypoints from videos using YOLOv8-Pose model.
 
 This script performs:
 1. Video-level pose extraction (17 COCO keypoints per frame)
@@ -35,7 +35,7 @@ KEYPOINT_NAMES = [
 ]
 
 # Reference points for normalization (indices)
-NECK_IDX = 5  # left_shoulder (we'll average with right_shoulder for neck approximation)
+NECK_IDX = 5  # left_shoulder (averaged with right_shoulder for neck approximation)
 HIP_CENTER_IDX = [11, 12]  # left_hip, right_hip
 
 
@@ -301,8 +301,6 @@ def process_video(video_path: str, model: YOLO, device: str = 'cuda',
     sequence = np.array(normalized_sequence, dtype=np.float32)
 
     # =========================================================
-    # 🚀 MIT-LEVEL POST-PROCESSING (Sequence Based)
-    # =========================================================
     
     # 1. Smart Interpolation (Fill Missing)
     T, V, C = sequence.shape
@@ -447,23 +445,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('--data_root', type=str, default='/home/ty/human-bahviour',
-                       help='Root directory containing train_set and test_set')
-    parser.add_argument('--output_dir', type=str, default='/home/ty/human-bahviour/pose_features_large',
-                       help='Output directory for processed .npy files')
+    # Use Relative Paths by default for portability
+    parser.add_argument('--data_root', type=str, default='.',
+                       help='Root directory containing train_set and test_set. Default: current directory.')
+    parser.add_argument('--output_dir', type=str, default='pose_features_large',
+                       help='Output directory for processed .npy files. Default: pose_features_large')
     parser.add_argument('--model_path', type=str, default='yolov8n-pose.pt',
-                       help='Path to YOLOv8-Pose model weights')
+                       help='Path to YOLOv8-Pose model weights. Default: yolov8n-pose.pt')
     parser.add_argument('--device', type=str, default='cuda',
                        choices=['cuda', 'cpu'],
-                       help='Device to run inference on')
+                       help='Device to run inference on. Default: cuda')
     parser.add_argument('--max_frames', type=int, default=60,
-                       help='Maximum sequence length (frames)')
+                       help='Maximum sequence length (frames). Default: 60')
     parser.add_argument('--batch_mode', type=str, default='train',
                        choices=['train', 'test', 'both'],
-                       help='Process train, test, or both sets')
+                       help='Process train, test, or both sets. Default: train')
     parser.add_argument('--deinterlace_method', type=str, default='linear',
                        choices=['bob', 'linear', 'none'],
-                       help='Deinterlacing method: bob (fast, recommended), linear (slower, better quality), or none')
+                       help='Deinterlacing method: bob (fast, recommended), linear (slower, better quality), or none. Default: linear')
 
     args = parser.parse_args()
 
@@ -493,14 +492,14 @@ def main():
 
     # Load YOLOv8-Pose model
     print(f"\nLoading YOLOv8-Pose model: {args.model_path}")
-    model = YOLO(args.model_path)
+    try:
+        model = YOLO(args.model_path)
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Attempting to download default yolov8n-pose.pt...")
+        model = YOLO('yolov8n-pose.pt')
 
     # Load class labels
-    # annotations_path = os.path.join(args.data_root, 'annotations', 'classInd.txt')
-    # class_to_idx = load_class_labels(annotations_path)
-    
-    # WE DON'T NEED EXTERNAL LABEL FILES.
-    # HRI30 encodes labels directly in filenames (e.g., CID23...).
     class_to_idx = {} 
     print("✅ Labels will be extracted directly from filenames (CIDxx). Robust & Simple.")
 
@@ -539,7 +538,7 @@ def main():
             video_name = video_path.name
 
             # Print which video is being processed (helps identify problematic videos)
-            tqdm.write(f"Processing: {video_name}")
+            # tqdm.write(f"Processing: {video_name}")
 
             # Extract pose sequence (with deinterlacing)
             sequence, success = process_video(str(video_path), model, args.device, args.max_frames, args.deinterlace_method)
