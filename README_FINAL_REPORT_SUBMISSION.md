@@ -38,16 +38,16 @@ Recognizing that skeleton data alone missed critical visual cues (e.g., tool app
 ### Phase 4: Object Awareness (DINO)
 To resolve ambiguity between similar actions involving different tools (e.g., "Use Drill" vs. "Use Polisher"), we integrated an object detection module.
 *   **Grounding DINO:** Employed to detect key industrial objects within the video frames.
-*   **Logic:** Implemented a "Veto" system where detected objects (e.g., "Drill") strongly penalized probabilities of incompatible actions (e.g., "Polisher" classes), acting as a hard constraint during inference.
+*   **Initial Logic:** Implemented a "Veto" system where detected objects (e.g., "Drill") strongly penalized probabilities of incompatible actions (e.g., "Polisher" classes), acting as a hard constraint during inference.
+*   **Limitation & Decision:** Despite its theoretical promise, in practice, DINO frequently struggled with occlusions, motion blur, and the fine-grained similarity of industrial tools within the HRI30 dataset. This led to **inaccurate detections that introduced significant confusion and negatively impacted the overall ensemble accuracy**. Therefore, DINO was ultimately **excluded from the final production ensemble** to maintain model stability and performance.
 
 ## 3. Final Ensemble Architecture
-Our final submission utilizes a weighted ensemble of the three components:
+Our final submission utilizes a weighted ensemble of the two core components:
 1.  **Flow-Stream (ResNet-18):** Captures high-fidelity motion patterns.
 2.  **Physics-Stream (LSTM):** Captures temporal dynamics and biomechanical constraints.
-3.  **Object-Stream (DINO):** Provides semantic context and error correction.
 
 **Fusion Strategy:**
-The ensemble prioritizes the stable LSTM predictions while leveraging the high-peak performance of Optical Flow. DINO acts as a final filter to remove semantic inconsistencies.
+The ensemble prioritizes the stable LSTM predictions while leveraging the high-peak performance of Optical Flow. The DINO module, despite its initial inclusion, was found to be detrimental in practice and was consequently excluded from the final fusion logic.
 
 ## 4. Conclusion
 By moving away from "black-box" Deep Learning methods that failed on small, noisy data, and embracing a **multi-modal, engineering-first approach**, we successfully built a high-performance action recognition system. The combination of explicit physics features, visual motion cues, and semantic object context proved far superior to relying on any single modality.
